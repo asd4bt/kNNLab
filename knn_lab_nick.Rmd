@@ -1,0 +1,232 @@
+---
+title: "KNN Lab"
+author: "Nick Kalinowski"
+date: "10/26/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(class)
+library(caret)
+library(ggplot2)
+```
+
+You left your job as a lobbyist because the political environment was become just too toxic to handle.  Luckily you landed a job in advertising! Unfortunately have a demanding and totally clueless boss. Clueless meaning that he doesn't understand data science, but he knows he wants it to be used to fix all the company's problems and you are just the data scientist to do it! 
+
+Your company, Marketing Enterprises of Halifax or "MEH" is being beat out by the competition and wants a new way to determine the quality of its commercials. Your boss, Mr. Ed Rooney, would like the company's commercials to seem more like actual TV shows. So we wants you to develop a "machine learning thing" using the company’s internal data to classify when something is a commercial and when it is not. Mr. Rooney believes the company will then know how to trick potential future customers into thinking their commercials are actually still part of the show and as a result will pay more attention and thus buy more of the terrible products "MEH" is supporting (it's a terrible plan, but you have to make a living). 
+
+Given that MEH is producing commercials more or less continuously you know there will be a need to update the model quite frequently, also being a newish data scientist and having a clueless boss you decide to use a accessible approach that you might be able to explain to Mr. Rooney, (given several months of dedicated one on one time), that approach is k-nearest neighbor. 
+
+You'll also need to document your work extensively, because Mr. Rooney doesn't know he's clueless so he will ask lots of "insightful" questions and require lots of detail that he won't understand, so you'll need to have an easy to use reference document. Before you get started you hearken back to the excellent education you received at UVA and using this knowledge outline roughly 20 steps that need to be completed to build this algo for MEH and Ed, they are documented below...good luck. As always, the most important part is translating your work to actionable insights, so please make sure to be verbose in the explanation required for step 20.  
+
+As with the clustering lab, please be prepared to present a five minute overview of your findings. 
+ 
+
+```{r}
+#1
+#Load in the data, both the commercial dataset and the labels. You'll need to the place the labels on the columns. The dataset "tv_commercialsets-CNN_Cleaned.csv",  is data collected about the features of commercials on CNN. We can try to predict what segments of video are commercials based on their audio and video components. More information on the datasets can be found data.world:
+# https://data.world/kramea/tv-commercial-detection/workspace/file?filename=tv_commercial_datasets%2FBBC_Cleaned.csv
+
+#You can use the function colnames() to apply the labels (hint: you might need to reshape the labels to make this work)
+
+setwd('/cloud/project/KNN')
+commercial_data = read.csv("tv_commercial_datasets_CNN_Cleaned.csv")
+comm_labs = read.csv("cnn_commmercial_label.csv", header=FALSE)
+labels = comm_labs[,1]
+colnames(commercial_data) = labels
+
+```
+
+```{r}
+#2. Determine the split between commercial and non-commercial then calculate the base rate, assume 1 is the commercial label and -1 is the non-commercial label 
+
+table(commercial_data$label)[2]/sum(table(commercial_data$label))
+
+#Base rate: 63.92% chance of correctly picking commercial
+```
+
+```{r}
+#3. Since there are columns that contain different metrics for the same variable (i.e. any column that ends in 'mn' is the mean of that variable, while any column that ends in 'var' is the variance of that variable), we don't need to keep both, drop all the columns that include var
+
+commercial_data = commercial_data %>% select(-ends_with("var"))
+```
+
+```{r}
+#4.  Before we run knn, sometimes it's good to check to make sure that our variables are not highly correlated. Use the cor() function on 'your_dataframe', label it 'commercial_correlations', and view the data.
+
+commercialCor = cor(commercial_data)
+#View(commercialCor)
+
+```
+
+```{r}
+#5. Determine which variables to remove, high correlations start around .7 or below -.7 I would especially remove variables that appear to be correlated with more than one variable. List your rationale here:
+
+
+mean(as.data.frame(commercialCor)$short_time_energy_mn)
+mean(as.data.frame(commercialCor)$spectral_flux_mn)
+mean(as.data.frame(commercialCor)$spectral_centroid_mn)
+mean(as.data.frame(commercialCor)$spectral_roll_off_mn)
+
+#Correlations with absolute value > 0.7 occur particularly for the motion_distr_mn data, particularly in regards to frame_diff_dist_mn (0.716 result). Therefore we will remove this variable
+
+#Likewise, we will also remove one of the short_time_energy_mn and spectral_flux_mn datapoints, as these have a correlation value of 0.823. Thus, after observation, we will remove the spectral_flex_mn datapoints because of its overall larger correlations with the remainder of the data than short_time_energy_mn. 
+
+#Finally, we observe that the spectral_centroid_mn and special_roll_off_mn have correlations also above 0.8 (0.809 to be exact), and thus spectral_centroid_mn will both be removed as well for the same reason as spectral_flex_mn above.
+```
+
+To summarize the above comments, the three columns removed were:
+
+- motion_distr_mn
+- spectral_flex_mn
+- spectral_centroid_mn
+
+
+```{r}
+#6. Subset the dataframe based on above.
+commercial_data = commercial_data %>% select(-motion_distr_mn,-spectral_flux_mn,-spectral_centroid_mn)
+```
+
+
+```{r}
+#7. Now we have our data and are ready to run the KNN, but we need to split into test and train. Create a index the will divide the data into a 70/30 split
+comm_index = round(0.7 * nrow(commercial_data), 0)
+comm_index
+```
+
+```{r}
+#8. Use the index above to generate a train and test sets, then check the row counts to be safe and show Mr. Rooney. 
+set.seed(10271999)
+train_rows = sample(1:nrow(commercial_data),
+                              comm_index,
+                              replace = FALSE)
+train_data = commercial_data[train_rows,]
+test_data = commercial_data[-train_rows,]
+#69.99778% train
+nrow(train_data)/nrow(commercial_data)
+#30.00222% test
+nrow(test_data)/nrow(commercial_data)
+```
+
+```{r}
+#9 Train the classifier using k = 3, remember to set.seed so you can repeat the output and to use the labels as a vector for the class (not a index of the dataframe)
+
+set.seed(10271999)
+comm_classify <-  knn(train = train_data[, 1:7],
+               test = test_data[, 1:7],    
+               cl = train_data$label,
+               k = 3,
+               use.all = TRUE,
+               prob = TRUE)
+```
+
+
+```{r}
+#10 Check the output using str and length just to be sure it worked
+str(comm_classify)
+length(comm_classify)
+```
+
+```{r}
+#11 Create a initial confusion matrix using the table function and pass it to a object. (xx <- your confusion matrix)
+conf_matrix = table(comm_classify,
+                test_data$label)
+conf_matrix
+```
+
+```{r}
+#12 Select the true positives and true negatives by selecting only the cells where the row and column names are the same.
+conf_matrix[row(conf_matrix) == col(conf_matrix)]
+
+```
+
+```{r}
+#13 Calculate the accuracy rate by dividing the correct classifications by the total number of classifications. Label the data 'kNN_acc_com', and view it. Comment on how this compares to the base rate. 
+
+kNN_acc_com = sum(conf_matrix[row(conf_matrix) == col(conf_matrix)]) / sum(conf_matrix)
+kNN_acc_com
+
+#Our initial base rate prediction was 63.9%, and the accuracy produced by this model is around 73.2%. Thus, our model can predict commercials about 10% better than we would have without general information. 
+```
+
+
+
+```{r}
+#14  Run the confusion matrix function and comment on the model output
+confusionMatrix(as.factor(comm_classify), as.factor(test_data$label), positive = "1", dnn=c("Prediction", "Actual"), mode = "sens_spec")
+
+
+#Our Sensitivity model represents our skill and rate in being correct when guessing that something is a commercial. The 3-nearest neighbor model produces a Sensitivity output of 83.05%. We want to make sure that this value is maximized (as opposed to the correct negative percentage, which is represented by the Specificity model), as we want to apply this model to our own commercials and check if they are detected correctly.
+```
+
+```{r}
+#15 Run the "chooseK" function to find the perfect K, while using sapply() function on chooseK() to test k from 1 to 21 (only selecting the odd numbers), and set the train_set argument to 'commercial_train', val_set to 'commercial_test', train_class to the "label"   column of 'commercial_train', and val_class to the "label" column of 'commercial_test'. Label this  "knn_diff_k_com"
+chooseK = function(k, train_set, val_set, train_class, val_class){
+  
+  # Build knn with k neighbors considered.
+  set.seed(10271999)
+  class_knn = knn(train = train_set,    
+                  test = val_set,       
+                  cl = train_class,     
+                  k = k,                
+                  use.all = TRUE)       
+  conf_mat = table(class_knn, val_class)
+  
+  # Calculate the accuracy.
+  accu = sum(conf_mat[row(conf_mat) == col(conf_mat)]) / sum(conf_mat)                         
+  cbind(k = k, accuracy = accu)
+}
+knn_diff_k_com = sapply(seq(1, 21, by = 2),  
+                         function(x) chooseK(x, 
+                                             train_set = train_data[,1:7],
+                                             val_set = test_data[,1:7],
+                                             train_class = train_data$label,
+                                             val_class = test_data$label))
+```
+
+```{r}
+#16 Create a dataframe so we can visualize the difference in accuracy based on K, convert the matrix to a dataframe
+k_output = data.frame(k = knn_diff_k_com[1,],
+                             accuracy = knn_diff_k_com[2,])
+k_output
+```
+
+```{r}
+#17 Use ggplot to show the output and comment on the k to select
+ggplot(k_output,
+       aes(x = k, y = accuracy)) +
+  geom_line(color = "orange", size = 1.5) +
+  geom_point(size = 3)
+
+#The elbow plot shows a decreased slope starting around k=11. Thus, the optimal number of nearest neighbors that we will pick is 11.
+```
+
+```{r}
+#18 Rerun the model  with "optimal" k 
+optimal_knn = knn(train = train_data[, 1:7],
+               test = test_data[, 1:7],    
+               cl = train_data$label,
+               k = 11,
+               use.all = TRUE,
+               prob = TRUE)
+```
+
+```{r}
+#19 Use the confusion matrix function to measure the quality of the new model
+confusionMatrix(as.factor(optimal_knn), as.factor(test_data$label), positive = "1", dnn=c("Prediction", "Actual"), mode = "sens_spec")
+
+```
+
+```{r}
+#20 Summarize the differences in language Mr. Rooney may actually understand. Include a discussion on which approach k=3 or k="optimal" is the better method moving forward for "MEH". Most importantly draft comments about the over approach and model quality as it relates to addressing the problem proposed by Ed. 
+
+```
+Our conclusions, Mr. Rooney, were obtained by comparing two different models, the 3-nearest-neighbor model and the 11-nearest-neighbor model. We do this by implementing a tool called KNN (or k-nearest-neighbor model), which serves to predict the output of a data point by looking at its 'k' closest neighboring points, obtained using euclidian distance. The label is obtained using majority vote, and as such odd numbered values of k will be favored. The baseline concept behind this algorithm is that similar inputs will map to similar outputs. Without the model, we know that we can predict whether or not something is a commercial around 63% of the time, and as a result we hope to generate a model that will greatly increase our chances of correctly predicting a commercial.
+
+After implementing the base case model (a knn model with k=3, a low number of neighbors), we find that the output is already far better at predicting commercials, with an overall accuracy rate of 73% (predicting both commercials and non-commericals correctly), and a Sensitivity rate (rate of correctly predicting a commercial without factoring in non-commercial rate) of 83%. We seek to maximize this "Sensitivity rate," so we ran a model to find the optimal "k" number of neighbors needed to produce the best model. Using an elbow chart (k on x-axis vs accuracy of model on y-axis), we find that 11 neighbors should work the best.
+
+After running the knn algorithm with 11 nearest neighbors, we find that the overall accuracy rate increased to 76%, and the Sensitivity rate to 88%. As we see a significant increase here, it would probably be best to move forward with this model, as it produces the best chances of correctly predicting a commercial when one is airing. An 88% Sensitivity rate means that the model is significantly better at predicting commercials than when we are given no information (which had a much lower 63% success rate).
